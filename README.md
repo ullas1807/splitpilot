@@ -1,3 +1,4 @@
+**Live Demo:** https://splitpilot-iota.vercel.app
 # 🧾 SplitPilot
 
 **An AI agent that turns a receipt photo into settled PayPal payments, and it can never spend money without a human approving it.**
