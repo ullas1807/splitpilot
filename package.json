@@ -1,0 +1,38 @@
+{
+  "name": "splitpilot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI agent that turns a receipt photo into settled PayPal payments, with human-approval guardrails.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "dev:full": "vercel dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node scripts/test-split.mjs && node scripts/test-agent.mjs && node scripts/test-llm.mjs && node scripts/test-security.mjs && node scripts/test-rawbody.mjs",
+    "test:agent": "node scripts/test-agent.mjs",
+    "test:llm": "node scripts/test-llm.mjs",
+    "preflight": "node scripts/preflight.mjs"
+  },
+  "dependencies": {
+    "@paypal/react-paypal-js": "^8.8.3",
+    "@supabase/supabase-js": "^2.45.0",
+    "framer-motion": "^11.11.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.460.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "vite": "6.4.5"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

@@ -1,0 +1,12 @@
+# Cloudflare Worker that wakes SplitPilot's reminder agent on a schedule.
+# Why not Vercel Cron? Vercel's free Hobby plan only allows daily cron jobs.
+name = "splitpilot-reminder-cron"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+# EDIT THIS to your deployed Vercel URL:
+SWEEP_URL = "https://YOUR-APP.vercel.app/api/agent-sweep"
