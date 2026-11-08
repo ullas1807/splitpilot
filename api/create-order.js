@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { supabase } from './_lib/supabase.js';
 import { paypalFetch } from './_lib/paypal.js';
 import { UUID_RE } from './_lib/http.js';
+import { sanitizeName } from './_lib/agent-tools.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -57,7 +58,7 @@ export default async function handler(req, res) {
           {
             reference_id: p.id,
             custom_id: p.id, // comes back on the webhook so we know who paid
-            description: `${p.split.title} - ${p.name}'s share`.slice(0, 127),
+            description: `${p.split.title} - ${sanitizeName(p.name, 30)}'s share`.slice(0, 127),
             amount: { currency_code: currency, value },
           },
         ],

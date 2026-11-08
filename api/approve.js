@@ -1,5 +1,6 @@
 import { supabase } from './_lib/supabase.js';
 import { allowMethod, assertOwner, logEvent, sanitizeText, LIMITS } from './_lib/http.js';
+import { sanitizeName } from './_lib/agent-tools.js';
 import { toCents } from './_lib/receipt.js';
 
 // THE GUARDRAIL: money requests only exist after a human clicks approve on this endpoint.
@@ -38,7 +39,7 @@ export default async function handler(req, res) {
     if (count > 0) { await revert(); return res.status(409).json({ error: 'Payment requests already exist.' }); }
 
     const { data: rows, error } = await supabase.from('participants')
-      .insert(requests.map((r) => ({ split_id: splitId, name: sanitizeText(r.name, 40), share: r.amount_cents / 100 })))
+      .insert(requests.map((r) => ({ split_id: splitId, name: sanitizeName(r.name, 30), share: r.amount_cents / 100 })))
       .select('id, name, share');
     if (error) { await revert(); throw error; }
 

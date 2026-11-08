@@ -1,13 +1,14 @@
 import { supabase } from './_lib/supabase.js';
 import { allowMethod, assertOwner, logEvent, sanitizeText } from './_lib/http.js';
 import { chat } from './_lib/llm.js';
-import { TOOLS, buildProposal, buildReminders } from './_lib/agent-tools.js';
+import { TOOLS, buildProposal, buildReminders, buildRoster, sanitizeName } from './_lib/agent-tools.js';
 
 const SYSTEM = `You are SplitPilot, an assistant that helps one person (the "owner", who already paid the bill) collect their friends' shares through PayPal.
 
 RULES
 - You can NEVER move money. You may only call propose_split (a proposal the owner must approve) or draft_reminders (text drafts).
 - CONVERSATIONAL MEMORY & FULL RE-DERIVATION: Re-derive the full split assignment from the ENTIRE conversation history each turn. When the owner gives new information or corrections (e.g. "Ravi didn't eat" or "I'll cover the tip"), maintain previously established assignments for other people and items, combining them into a full new propose_split call.
+- ROSTER RESTRICTION: You may ONLY include people from the established dinner roster. Never invent, add, or assume new people unless the user explicitly tells you to add them (e.g. "add Priya").
 - EXCLUDED PARTICIPANTS: If someone is mentioned as not eating, drinking, or participating (e.g. "Ravi didn't eat"), include their name in excluded_people. NEVER assign any items to an excluded person. Do NOT silently assign excluded participants to unassigned items.
 - TIP ALLOCATION:
   * "owner_covers" if the owner says they will cover, pay, or handle the tip.
@@ -30,6 +31,7 @@ export default async function handler(req, res) {
     if (!message) return res.status(400).json({ error: 'Type a message first.' });
     if (!(await assertOwner(splitId, ownerKey))) return res.status(403).json({ error: 'Only the owner can talk to the agent.' });
 
+    // Note on history: reads all user messages for this split without a limit window
     const [{ data: split }, { data: items }, { data: participants }, { data: history }] = await Promise.all([
       supabase.from('splits').select('*').eq('id', splitId).single(),
       supabase.from('items').select('id, name, price, quantity').eq('split_id', splitId).order('name'),
@@ -44,8 +46,17 @@ export default async function handler(req, res) {
 
     await logEvent(splitId, 'user_message', { payload: { text: message } });
 
+    // Build the established attendee roster server-side from all prior user messages + current message
+    const roster = buildRoster({
+      ownerName: split.owner_name,
+      history,
+      currentMessage: message,
+      items: items.map((i) => ({ name: i.name })),
+      existingParticipants: participants,
+    });
+
     const context = {
-      owner: split.owner_name,
+      owner: sanitizeName(split.owner_name, 30),
       currency: split.currency,
       venue: split.venue,
       items: items.map((i) => ({ name: i.name, line_total: Number(i.price) })),
@@ -53,7 +64,8 @@ export default async function handler(req, res) {
       tip: Number(split.tip),
       total: Number(split.total),
       payment_requests_exist: participants.length > 0,
-      participants: participants.map((p) => ({ name: p.name, share: Number(p.share), status: p.status })),
+      participants: participants.map((p) => ({ name: sanitizeName(p.name, 30), share: Number(p.share), status: p.status })),
+      roster,
     };
 
     const messages = [
@@ -88,10 +100,13 @@ export default async function handler(req, res) {
       if (participants.length > 0) {
         reply = 'Payment requests already exist for this split, so I can\'t propose a new one. I can still draft reminders.';
       } else {
+        const prevProposal = [...(history || [])].reverse().find((h) => h.action === 'proposal' && h.payload)?.payload;
         const built = buildProposal({
           split,
           items: items.map((i) => ({ name: i.name, line_total: Number(i.price) })),
           args: proposeCall.args,
+          roster,
+          prevProposal,
         });
 
         if (built.error) {
