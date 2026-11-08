@@ -3,6 +3,7 @@ import NewSplit from './components/NewSplit';
 import SplitView from './components/SplitView';
 import PayPage from './components/PayPage';
 import TripLedger from './components/TripLedger';
+import { QuickDemo } from './phase4/Extras';
 
 function Shell({ children }) {
   return (
@@ -29,6 +30,7 @@ function Home() {
           <span className="chip"><Wallet size={14} /> Live PayPal status</span>
         </div>
       </section>
+      <QuickDemo />
       <NewSplit />
       <TripLedger />
     </div>

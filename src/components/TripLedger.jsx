@@ -44,7 +44,7 @@ export default function TripLedger() {
   }, []);
 
   if (!splits.length) return null;
-  const markers = splits.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng, label: `${s.title} · ${money(s.total, s.currency)}`, href: `/?s=${s.id}` }));
+  const markers = splits.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng, status: s.status, label: `${s.title} · ${money(s.total, s.currency)}`, href: `/?s=${s.id}` }));
 
   return (
     <motion.section className="card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>

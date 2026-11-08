@@ -8,6 +8,7 @@ import { useParticipants } from '../hooks/useParticipants';
 import { useAgentFeed } from '../hooks/useAgentFeed';
 import AgentFeed from './AgentFeed';
 import VenueMap from './VenueMap';
+import { LiveEffects, GuardrailBadge, DemoGuide } from '../phase4/Extras';
 
 function CopyButton({ text, label, icon }) {
   const [ok, setOk] = useState(false);
@@ -56,6 +57,11 @@ export default function SplitView({ splitId }) {
 
   return (
     <div className="stack">
+      <LiveEffects
+         participants={participants}
+         currency={split.currency}
+         status={split.status}
+      />
       <motion.section className="card" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
         <div className="head">
           <div>
@@ -77,6 +83,13 @@ export default function SplitView({ splitId }) {
           {isOwner && ownerLink && <CopyButton text={ownerLink} label="Copy owner link (keep private)" icon={<KeyRound size={14} />} />}
         </div>
       </motion.section>
+      <GuardrailBadge />
+      <DemoGuide
+         entries={entries}
+         participants={participants}
+         status={split.status}
+         isOwner={isOwner}
+      />
 
       <div className="cols">
         <section className="card col-main">
@@ -131,7 +144,7 @@ export default function SplitView({ splitId }) {
 
           <section className="card">
             <h2 className="h2"><MapPin size={18} /> Where</h2>
-            <VenueMap markers={[{ id: split.id, lat: split.lat, lng: split.lng, label: split.venue || split.title }]} height={200} />
+            <VenueMap markers={[{ id: split.id, lat: split.lat, lng: split.lng, status: split.status, label: split.venue || split.title }]} height={200} />
           </section>
         </div>
       </div>

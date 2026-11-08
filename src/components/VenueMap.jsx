@@ -2,6 +2,9 @@ import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
+const TONES = { settled: 'ok', open: 'wait' };
+const pin = (tone) => L.divIcon({ className: `pin pin-${tone}`, html: '<span></span>', iconSize: [30, 38], iconAnchor: [15, 38], popupAnchor: [0, -34] });
+
 function Fit({ markers }) {
   const map = useMap();
   useEffect(() => {
@@ -11,7 +14,7 @@ function Fit({ markers }) {
   return null;
 }
 
-// markers: [{ id, lat, lng, label, href? }]  -  tiles and data: OpenStreetMap contributors
+// markers: [{ id, lat, lng, label, href?, status? }]. Pin color follows status. Tiles: OpenStreetMap contributors.
 export default function VenueMap({ markers, height = 260 }) {
   const valid = markers.filter((m) => typeof m.lat === 'number' && typeof m.lng === 'number');
   if (!valid.length) return <div className="map-empty" style={{ height }}>No location set</div>;
@@ -20,10 +23,8 @@ export default function VenueMap({ markers, height = 260 }) {
       <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
       <Fit markers={valid} />
       {valid.map((m) => (
-        <Marker key={m.id} position={[m.lat, m.lng]}>
-          <Popup>
-            {m.href ? <a href={m.href}>{m.label}</a> : m.label}
-          </Popup>
+        <Marker key={m.id} position={[m.lat, m.lng]} icon={pin(TONES[m.status] || 'brand')}>
+          <Popup>{m.href ? <a href={m.href}>{m.label}</a> : m.label}</Popup>
         </Marker>
       ))}
     </MapContainer>

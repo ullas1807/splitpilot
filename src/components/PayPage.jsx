@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import { money } from '../lib/format';
 import PayButton from './PayButton';
+import { PaidCelebration } from '../phase4/Extras';
 
 export default function PayPage({ participantId }) {
   const [p, setP] = useState(null);
@@ -43,6 +44,7 @@ export default function PayPage({ participantId }) {
       <h1 className="h1">Hi {p.name} 👋</h1>
       <p className="muted">{p.split.owner_name} covered the bill. Your share is:</p>
       <p className="amount">{money(p.share, p.split.currency)}</p>
+      <PaidCelebration paid={paid} />
       {paid ? (
         <motion.div className="paid" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}>
           <CheckCircle2 size={56} color="var(--ok)" />
