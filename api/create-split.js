@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { supabase } from './_lib/supabase.js';
 import { allowMethod, sanitizeText, logEvent, LIMITS } from './_lib/http.js';
 import { normalizeReceipt, CURRENCIES } from './_lib/receipt.js';
+import { sanitizeName } from './_lib/agent-tools.js';
 
 const inRange = (n, min, max) => typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max;
 
@@ -47,8 +48,22 @@ export default async function handler(req, res) {
       throw secretErr;
     }
 
+    let exampleText = 'Dinner was me, Asha and Ravi. Asha had the first item, Ravi and I shared the second.';
+    if (Array.isArray(r.items) && r.items.length >= 2) {
+      const item1 = sanitizeName(r.items[0]?.name, 30).toLowerCase();
+      const item2 = sanitizeName(r.items[1]?.name, 30).toLowerCase();
+      if (item1 && item2) {
+        exampleText = `Dinner was me, Asha and Ravi. Asha had the ${item1}, Ravi and I shared the ${item2}.`;
+      }
+    } else if (Array.isArray(r.items) && r.items.length === 1) {
+      const item1 = sanitizeName(r.items[0]?.name, 30).toLowerCase();
+      if (item1) {
+        exampleText = `Dinner was me, Asha and Ravi. We shared the ${item1}.`;
+      }
+    }
+
     await logEvent(split.id, 'agent_message', {
-      payload: { text: `Receipt loaded: ${r.items.length} items, total ${r.total.toFixed(2)} ${currency}. Tell me who shared the meal and who had what, for example "Asha and Ravi split the pizza, Meera had the pasta." I'll draft a split for you to approve.` },
+      payload: { text: `Receipt loaded: ${r.items.length} items, total ${r.total.toFixed(2)} ${currency}. Tell me who was at dinner and who had what, for example "${exampleText}" I'll draft a split for you to approve.` },
     });
 
     return res.status(200).json({ splitId: split.id, ownerKey });

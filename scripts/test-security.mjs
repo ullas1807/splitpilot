@@ -251,7 +251,7 @@ console.log('Testing api/split.js...');
       return {
         select: () => ({
           eq: () => ({
-            order: async () => ({ data: [{ id: 'item-1', name: 'Pizza', price: 20, quantity: 1 }] }),
+            order: async () => ({ data: [{ id: 'item-1', name: 'Garlic Bread', price: 20, quantity: 1 }] }),
           }),
         }),
       };

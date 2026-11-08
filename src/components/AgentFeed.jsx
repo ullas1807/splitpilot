@@ -125,7 +125,7 @@ export default function AgentFeed({ splitId, ownerKey, isOwner, hasParticipants,
 
   const suggestions = hasParticipants
     ? ['Remind everyone who hasn\'t paid', 'Who still owes me?']
-    : ['Split everything equally between me, Asha, Ravi and Meera', 'Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta. Garlic bread and lemonades are shared by all four of us'];
+    : ['Split everything equally between me, Asha, Ravi and Meera', 'Dinner was me, Asha, Ravi and Meera. Asha had the paneer tikka, Ravi and I shared the garlic bread, Meera had the gulab jamun. The masala soda is shared by all four of us.'];
 
   return (
     <div className="feed">

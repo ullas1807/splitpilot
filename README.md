@@ -7,7 +7,7 @@ Built for the *Build What's Next with PayPal and AI* hackathon.
 
 > **Judges: 60-second try-out**
 > 1. Open the hosted demo → click **Use sample receipt** → **Create split**.
-> 2. In the agent chat, click the suggestion chip (or type *"Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta; the rest is shared by all four of us"*).
+> 2. In the agent chat, click the suggestion chip (or type *"Dinner was me, Asha, Ravi and Meera. Asha had the paneer tikka, Ravi and I shared the garlic bread, Meera had the gulab jamun. The masala soda is shared by all four of us"*).
 > 3. Review the **proposed split**, click **Approve & create payment requests**.
 > 4. Click a **Pay link**, pay with a PayPal *sandbox personal* account, and watch the first tab flip to **Paid** live.
 >

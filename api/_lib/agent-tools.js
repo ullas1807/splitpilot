@@ -189,7 +189,7 @@ export function extractExplicitAdds(msg, receiptItemNames = []) {
  * - "Split everything equally between me, Asha, Ravi and Meera"
  * - "Asha, Ravi, Meera and I"
  * - Chip 1: "Split everything equally between me, Asha, Ravi and Meera"
- * - Chip 2: "Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta. Garlic bread and lemonades are shared by all four of us"
+ * - Chip 2: "Dinner was me, Asha, Ravi and Meera. Asha had the paneer tikka, Ravi and I shared the garlic bread, Meera had the gulab jamun. The masala soda is shared by all four of us."
  */
 export function parseGroupDeclaration(msg, receiptItemNames = []) {
   if (!msg || typeof msg !== 'string') return [];

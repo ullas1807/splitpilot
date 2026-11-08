@@ -1,5 +1,6 @@
 // Run with: npm run test:agent  (offline: checks tool-call -> proposal logic and guardrails)
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 // The modules create a Supabase client at import time; placeholders are enough for offline tests.
 process.env.SUPABASE_URL ||= 'http://localhost:54321';
@@ -18,15 +19,14 @@ const { normalizeReceipt } = await import('../api/_lib/receipt.js');
 const { default: agentHandler } = await import('../api/agent.js');
 const { supabase } = await import('../api/_lib/supabase.js');
 
-const split = { owner_name: 'Sam', currency: 'USD', tax: 4.32, tip: 8.0 };
+const split = { owner_name: 'Sam', currency: 'USD', tax: 4.64, tip: 5.8 };
 const items = [
-  { name: 'Margherita Pizza', line_total: 14.0 },
-  { name: 'Paneer Tikka', line_total: 11.5 },
-  { name: 'Pasta Alfredo', line_total: 13.0 },
-  { name: 'Garlic Bread', line_total: 6.5 },
-  { name: 'Lemonade', line_total: 9.0 },
+  { name: 'Garlic Bread', line_total: 18.0 },
+  { name: 'Paneer Tikka', line_total: 30.0 },
+  { name: 'Masala Soda', line_total: 4.0 },
+  { name: 'Gulab Jamun', line_total: 6.0 },
 ];
-const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
+const total = 18 + 30 + 4 + 6 + 4.64 + 5.8;
 
 // 1) Normal proposal: "me" alias, case differences, fuzzy item match
 {
@@ -38,9 +38,9 @@ const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
       tax_tip_mode: 'proportional',
       explanation: 'x',
       assignments: [
-        { item_name: 'margherita pizza', people: ['Asha', 'Ravi'] },
+        { item_name: 'garlic bread', people: ['Asha', 'Ravi'] },
         { item_name: 'paneer', people: ['me'] },
-        { item_name: 'Pasta', people: ['Meera'] },
+        { item_name: 'Gulab Jamun', people: ['Meera'] },
       ],
     },
   });
@@ -144,8 +144,8 @@ const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
       tip_mode: 'owner_covers',
       explanation: 'Hallucinated model explanation that should be ignored',
       assignments: [
-        { item_name: 'Margherita Pizza', people: ['Asha'] },
-        { item_name: 'Pasta Alfredo', people: ['Meera'] },
+        { item_name: 'Paneer Tikka', people: ['Asha'] },
+        { item_name: 'Garlic Bread', people: ['Meera'] },
       ],
     },
   });
@@ -178,7 +178,7 @@ const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
       excluded_people: ['Ravi'],
       tax_tip_mode: 'equal',
       assignments: [
-        { item_name: 'Margherita Pizza', people: ['Ravi'] }, // Contradiction: Ravi is excluded but assigned an item
+        { item_name: 'Paneer Tikka', people: ['Ravi'] }, // Contradiction: Ravi is excluded but assigned an item
       ],
     },
   });
@@ -196,7 +196,7 @@ const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
       tax_tip_mode: 'proportional',
       tip_mode: 'even',
       assignments: [
-        { item_name: 'Margherita Pizza', people: ['Asha'] },
+        { item_name: 'Garlic Bread', people: ['Asha'] },
         { item_name: 'Paneer Tikka', people: ['me'] },
       ],
     },
@@ -217,13 +217,13 @@ console.log('Testing roster parsing and phrasing requirements (Requirement A & D
 
 const itemNames = items.map((i) => i.name);
 
-// 10) Phrasing parsing tests & exact suggestion chips from src/components/AgentFeed.jsx (Requirement A & Item 9)
+// 10) Phrasing parsing tests & exact suggestion chips from src/components/AgentFeed.jsx (Requirement A & Item 9 & Step 5)
 {
   // A1: "Dinner was me, Asha, Ravi and Meera"
   const r1 = parseGroupDeclaration('Dinner was me, Asha, Ravi and Meera', itemNames);
   assert.deepEqual(r1, ['Asha', 'Ravi', 'Meera']);
 
-  // A2: "Split everything equally between me, Asha, Ravi and Meera" (Exact UI chip 1)
+  // A2: "Split everything equally between me, Asha, Ravi and Meera"
   const r2 = parseGroupDeclaration('Split everything equally between me, Asha, Ravi and Meera', itemNames);
   assert.deepEqual(r2, ['Asha', 'Ravi', 'Meera']);
 
@@ -231,11 +231,84 @@ const itemNames = items.map((i) => i.name);
   const r3 = parseGroupDeclaration('Asha, Ravi, Meera and I', itemNames);
   assert.deepEqual(r3, ['Asha', 'Ravi', 'Meera']);
 
-  // A4: Exact UI Chip 2 from src/components/AgentFeed.jsx
-  const chip2 =
-    'Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta. Garlic bread and lemonades are shared by all four of us';
-  const r4 = parseGroupDeclaration(chip2, itemNames);
-  assert.deepEqual(r4, ['Asha', 'Ravi', 'Meera']);
+  // Read the exact chip strings from AgentFeed.jsx by regex (do not import JSX)
+  const feedSrc = fs.readFileSync(new URL('../src/components/AgentFeed.jsx', import.meta.url), 'utf8');
+  const chipMatch = feedSrc.match(/: \['([^']+)', '([^']+)'\]/);
+  assert.ok(chipMatch, 'Suggestion chips must be found in AgentFeed.jsx');
+  const chip1FromSource = chipMatch[1];
+  const chip2FromSource = chipMatch[2];
+
+  assert.equal(chip1FromSource, 'Split everything equally between me, Asha, Ravi and Meera');
+  assert.equal(
+    chip2FromSource,
+    'Dinner was me, Asha, Ravi and Meera. Asha had the paneer tikka, Ravi and I shared the garlic bread, Meera had the gulab jamun. The masala soda is shared by all four of us.'
+  );
+
+  // Both chip texts produce expected roster through buildRoster() with the sample receipt items:
+  const rosterChip1 = buildRoster({ ownerName: 'Sam', history: [], currentMessage: chip1FromSource, items });
+  assert.deepEqual(rosterChip1, ['Sam', 'Asha', 'Ravi', 'Meera']);
+
+  const rosterChip2 = buildRoster({ ownerName: 'Sam', history: [], currentMessage: chip2FromSource, items });
+  assert.deepEqual(rosterChip2, ['Sam', 'Asha', 'Ravi', 'Meera']);
+
+  // New greeting example from create-split.js produces expected roster:
+  const greetingExample = 'Dinner was me, Asha and Ravi. Asha had the garlic bread, Ravi and I shared the paneer tikka.';
+  const rosterGreeting = buildRoster({ ownerName: 'Sam', history: [], currentMessage: greetingExample, items });
+  assert.deepEqual(rosterGreeting, ['Sam', 'Asha', 'Ravi']);
+
+  // The item names in chip 2 resolve to the four receipt items with no ambiguity and no unknown item:
+  const chip2Assignments = [
+    { item_name: 'paneer tikka', people: ['Asha'] },
+    { item_name: 'garlic bread', people: ['Ravi', 'me'] },
+    { item_name: 'gulab jamun', people: ['Meera'] },
+    { item_name: 'masala soda', people: ['me', 'Asha', 'Ravi', 'Meera'] },
+  ];
+  const propChip2 = buildProposal({
+    split,
+    items,
+    args: {
+      people: ['Asha', 'Ravi', 'Meera'],
+      tax_tip_mode: 'proportional',
+      tip_mode: 'proportional',
+      assignments: chip2Assignments,
+    },
+    roster: rosterChip2,
+  });
+  assert.equal(propChip2.error, undefined, 'Chip 2 assignments must have no unknown items or ambiguity');
+
+  // Run the chip-2 assignment through the real split-math and assert shares sum to exactly 6844 cents:
+  // (Asha: Paneer Tikka; Ravi and owner: Garlic Bread; Meera: Gulab Jamun; Masala Soda shared by all four; tip proportional, tax proportional)
+  const { computeShares } = await import('../api/_lib/split-math.js');
+  const chip2Shares = computeShares({
+    people: ['Sam', 'Asha', 'Ravi', 'Meera'],
+    itemCents: [1800, 3000, 400, 600], // Garlic Bread 1800, Paneer Tikka 3000, Masala Soda 400, Gulab Jamun 600
+    itemNames: ['Garlic Bread', 'Paneer Tikka', 'Masala Soda', 'Gulab Jamun'],
+    assigned: [
+      ['Ravi', 'Sam'], // Garlic Bread
+      ['Asha'], // Paneer Tikka
+      ['Sam', 'Asha', 'Ravi', 'Meera'], // Masala Soda
+      ['Meera'], // Gulab Jamun
+    ],
+    taxCents: 464,
+    tipCents: 580,
+    mode: 'proportional',
+    tipMode: 'proportional',
+    ownerName: 'Sam',
+  });
+
+  const sumChip2 = chip2Shares.reduce((a, s) => a + s.totalCents, 0);
+  assert.equal(sumChip2, 6844, 'Chip 2 shares must sum to exactly 6844 cents');
+
+  // Hand-computed reference: Asha 36.58, Ravi 11.80, Meera 8.26, owner 11.80
+  const ashaShare = chip2Shares.find((s) => s.name === 'Asha');
+  const raviShare = chip2Shares.find((s) => s.name === 'Ravi');
+  const meeraShare = chip2Shares.find((s) => s.name === 'Meera');
+  const ownerShare = chip2Shares.find((s) => s.name === 'Sam');
+
+  assert.equal(ashaShare.totalCents, 3658, 'Asha must pay 36.58 (3658 cents)');
+  assert.equal(raviShare.totalCents, 1180, 'Ravi must pay 11.80 (1180 cents)');
+  assert.equal(meeraShare.totalCents, 826, 'Meera must pay 8.26 (826 cents)');
+  assert.equal(ownerShare.totalCents, 1180, 'Owner must pay 11.80 (1180 cents)');
 }
 
 // 11) Negation and look-alikes tests (Requirement D)

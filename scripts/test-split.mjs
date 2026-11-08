@@ -10,20 +10,19 @@ for (let total = 0; total < 500; total += 7) {
 // Scenario: the sample receipt
 const people = ['You', 'Asha', 'Ravi', 'Meera'];
 const items = [
-  { name: 'Margherita Pizza', cents: 1400 },
-  { name: 'Paneer Tikka', cents: 1150 },
-  { name: 'Pasta Alfredo', cents: 1300 },
-  { name: 'Garlic Bread', cents: 650 },
-  { name: 'Lemonade x3', cents: 900 },
+  { name: 'Garlic Bread', cents: 1800 },
+  { name: 'Paneer Tikka', cents: 3000 },
+  { name: 'Masala Soda', cents: 400 },
+  { name: 'Gulab Jamun', cents: 600 },
 ];
-const assigned = [['Asha', 'Ravi'], ['You'], ['Meera'], null, ['You', 'Asha', 'Meera']];
+const assigned = [['Ravi', 'You'], ['Asha'], null, ['Meera']];
 for (const mode of ['proportional', 'equal']) {
   const shares = computeShares({
     people, itemCents: items.map((i) => i.cents), itemNames: items.map((i) => i.name),
-    assigned, taxCents: 432, tipCents: 800, mode,
+    assigned, taxCents: 464, tipCents: 580, mode,
   });
   const sum = shares.reduce((a, s) => a + s.totalCents, 0);
-  assert.equal(sum, 1400 + 1150 + 1300 + 650 + 900 + 432 + 800, `sum mismatch in ${mode}`);
+  assert.equal(sum, 1800 + 3000 + 400 + 600 + 464 + 580, `sum mismatch in ${mode}`);
 }
 
 // Scenario: excluded person (Ravi didn't eat) must NOT receive unassigned items, tax or tip

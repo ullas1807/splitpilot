@@ -29,7 +29,7 @@ Every red line prints a `fix:` hint. Resolve them all before you deploy.
 
 ## 3. The flow
 1. Home page -> sample receipt -> create the split.
-2. Tell the agent: "Asha and Ravi shared the starters, Meera had the pasta, split tax evenly".
+2. Tell the agent: "Dinner was me, Asha and Ravi. Asha had the garlic bread, Ravi and I shared the paneer tikka, split tax evenly".
 3. An approval card appears and nothing is charged yet. Click **Approve**.
 4. Open a friend's pay link in a second window and pay with your sandbox **Personal** account.
 5. The owner dashboard shows Paid within a few seconds, with no refresh. When everyone has paid, the split is settled.
