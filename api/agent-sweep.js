@@ -13,7 +13,6 @@ export default async function handler(req, res) {
   // Safety caps: never spend more than TIME_BUDGET_MS on one run; never call LLM more than SPLIT_CAP times.
   const splitCap = Number(process.env.SWEEP_SPLIT_CAP || 5);
   const timeBudgetMs = Number(process.env.SWEEP_BUDGET_MS || 8000); // well inside Vercel's 10 s limit
-  const windowDays = Number(process.env.SWEEP_WINDOW_DAYS || 3);
   const llmTimeoutMs = Number(process.env.SWEEP_LLM_TIMEOUT_MS || 4000);
 
   const deadline = Date.now() + timeBudgetMs;
@@ -23,7 +22,7 @@ export default async function handler(req, res) {
     const interval = Number(process.env.SWEEP_INTERVAL_MIN || 1440);
     const now = Date.now();
     const createdBefore = new Date(now - minAge * 60000).toISOString();
-    const createdAfter = new Date(now - windowDays * 86400000).toISOString();
+    const createdAfter = new Date(now - 48 * 3600 * 1000).toISOString(); // ignore splits older than 48h
     const remindedBefore = new Date(now - interval * 60000).toISOString();
 
     // Query participants with inner join on splits to avoid starvation from closed/stale splits.
