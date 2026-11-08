@@ -80,4 +80,82 @@ const total = 14 + 11.5 + 13 + 6.5 + 9 + 4.32 + 8;
   assert.equal(r.total_matches, false);
   assert.ok(!/[\n\u0000]/.test(r.venue));
 }
+
+// 7) Excluded people: zero share, not charged, unassigned items don't go to excluded
+{
+  const { proposal, error } = buildProposal({
+    split,
+    items,
+    args: {
+      people: ['Asha', 'Meera'],
+      excluded_people: ['Ravi'],
+      tax_tip_mode: 'proportional',
+      tip_mode: 'owner_covers',
+      explanation: 'Hallucinated model explanation that should be ignored',
+      assignments: [
+        { item_name: 'Margherita Pizza', people: ['Asha'] },
+        { item_name: 'Pasta Alfredo', people: ['Meera'] },
+      ],
+    },
+  });
+  assert.equal(error, undefined);
+  assert.deepEqual(proposal.excluded, ['Ravi']);
+  assert.ok(!proposal.requests.some((r) => r.name.toLowerCase() === 'ravi'), 'Ravi must have no payment request');
+  assert.match(proposal.summary, /Excluded \(\$0\): Ravi/);
+  assert.match(proposal.summary, /Tip covered by Sam/);
+  assert.ok(!proposal.summary.includes('Hallucinated'), 'Server-side summary must replace model explanation');
+  assert.ok(proposal.assumptions.length > 0, 'Card must have an Assumptions line');
+
+  // Verify tip_mode: owner_covers allocated tip to Sam
+  const ashaReq = proposal.requests.find((r) => r.name === 'Asha');
+  const meeraReq = proposal.requests.find((r) => r.name === 'Meera');
+  assert.equal(ashaReq.tip_cents, 0, 'Asha pays zero tip under owner_covers');
+  assert.equal(meeraReq.tip_cents, 0, 'Meera pays zero tip under owner_covers');
+
+  // Total check
+  const sum = proposal.requests.reduce((a, r) => a + r.amount_cents, 0) + proposal.owner_share_cents;
+  assert.equal(sum, Math.round(total * 100));
+}
+
+// 8) If an excluded person ends up with non-zero share, reject proposal server-side
+{
+  const { error } = buildProposal({
+    split,
+    items,
+    args: {
+      people: ['Asha'],
+      excluded_people: ['Ravi'],
+      tax_tip_mode: 'equal',
+      assignments: [
+        { item_name: 'Margherita Pizza', people: ['Ravi'] }, // Contradiction: Ravi is excluded but assigned an item
+      ],
+    },
+  });
+  assert.ok(error, 'Must reject proposal when excluded person has non-zero share');
+  assert.match(error, /Proposal rejected: Ravi is marked as excluded/);
+}
+
+// 9) tip_mode = 'even' separates tax and tip
+{
+  const { proposal } = buildProposal({
+    split,
+    items,
+    args: {
+      people: ['Asha'],
+      tax_tip_mode: 'proportional',
+      tip_mode: 'even',
+      assignments: [
+        { item_name: 'Margherita Pizza', people: ['Asha'] },
+        { item_name: 'Paneer Tikka', people: ['me'] },
+      ],
+    },
+  });
+  assert.equal(proposal.tip_mode, 'even');
+  assert.equal(proposal.tax_mode, 'proportional');
+  const asha = proposal.requests.find((r) => r.name === 'Asha');
+  assert.ok(asha.tax_cents > 0);
+  assert.ok(asha.tip_cents > 0);
+  assert.equal(asha.tax_cents + asha.tip_cents, asha.tax_tip_cents);
+}
+
 console.log('agent-tools + receipt: all tests passed');

@@ -25,6 +25,7 @@ function ProposalCard({ entry, isOwner, busy, onDecide }) {
         <span className={`chip ${entry.status === 'approved' ? 'chip-ok' : pending ? 'chip-wait' : 'chip-muted'}`}>{entry.status}</span>
       </div>
       {entry.reasoning && <p className="muted">{entry.reasoning}</p>}
+      {p.assumptions && <p className="muted small"><strong>Assumptions:</strong> {p.assumptions}</p>}
       <ul className="list">
         {(p.requests || []).map((r) => (
           <li key={r.name} className="row">
@@ -40,7 +41,11 @@ function ProposalCard({ entry, isOwner, busy, onDecide }) {
           <span className="muted">{centsToMoney(p.owner_share_cents, p.currency)}</span>
         </li>
       </ul>
-      <p className="muted small">Tax and tip split {p.mode === 'equal' ? 'evenly' : 'in proportion to what each person ordered'}. Amounts are calculated exactly by the server, not by the AI.</p>
+      <p className="muted small">
+        Tax split {p.tax_mode === 'equal' || p.mode === 'equal' ? 'evenly' : 'proportionally'}.{' '}
+        Tip {p.tip_mode === 'owner_covers' ? `covered by ${p.owner_name}` : p.tip_mode === 'even' ? 'split evenly' : 'split proportionally'}.{' '}
+        Amounts are calculated exactly by the server, not by the AI.
+      </p>
       {(p.unmatched || []).length > 0 && <p className="alert alert-warn">I couldn't match: {p.unmatched.join(', ')}. Those items were shared equally.</p>}
       {pending && isOwner && (
         <div className="actions">
