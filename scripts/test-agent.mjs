@@ -217,13 +217,13 @@ console.log('Testing roster parsing and phrasing requirements (Requirement A & D
 
 const itemNames = items.map((i) => i.name);
 
-// 10) Phrasing parsing tests (Requirement A)
+// 10) Phrasing parsing tests & exact suggestion chips from src/components/AgentFeed.jsx (Requirement A & Item 9)
 {
   // A1: "Dinner was me, Asha, Ravi and Meera"
   const r1 = parseGroupDeclaration('Dinner was me, Asha, Ravi and Meera', itemNames);
   assert.deepEqual(r1, ['Asha', 'Ravi', 'Meera']);
 
-  // A2: "Split everything equally between me, Asha, Ravi and Meera" (UI chip 1)
+  // A2: "Split everything equally between me, Asha, Ravi and Meera" (Exact UI chip 1)
   const r2 = parseGroupDeclaration('Split everything equally between me, Asha, Ravi and Meera', itemNames);
   assert.deepEqual(r2, ['Asha', 'Ravi', 'Meera']);
 
@@ -231,7 +231,7 @@ const itemNames = items.map((i) => i.name);
   const r3 = parseGroupDeclaration('Asha, Ravi, Meera and I', itemNames);
   assert.deepEqual(r3, ['Asha', 'Ravi', 'Meera']);
 
-  // A4: UI Chip 2: "Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta. Garlic bread and lemonades are shared by all four of us"
+  // A4: Exact UI Chip 2 from src/components/AgentFeed.jsx
   const chip2 =
     'Asha and Ravi shared the pizza, I had the paneer, Meera had the pasta. Garlic bread and lemonades are shared by all four of us';
   const r4 = parseGroupDeclaration(chip2, itemNames);
@@ -258,13 +258,139 @@ const itemNames = items.map((i) => i.name);
   assert.deepEqual(extractExplicitAdds('add Priya', itemNames), ['Priya']);
 }
 
-// 12) Name sanitization tests (Requirement F)
+// 12) Name sanitization tests (Requirement F & Item 9)
 {
   assert.equal(sanitizeName('Priya<script>alert(1)</script>'), 'Priyaalert');
   assert.equal(sanitizeName('   mary-jane o\'connor   '), "Mary-Jane O'Connor");
   assert.equal(sanitizeName('abcdefghijklmnopqrstuvwxyz1234567890'), 'Abcdefghijklmnopqrstuvwxyz');
   assert.equal(sanitizeName('12345!@#$'), '');
   assert.equal(sanitizeName('asha'), 'Asha');
+
+  // Max 30 chars limit truncation
+  const longName = 'Alexander-Maximilian Montgomery-Smith';
+  const sanitizedLong = sanitizeName(longName, 30);
+  assert.equal(sanitizedLong, 'Alexander-Maximilian Montgomer');
+  assert.ok(sanitizedLong.length <= 30);
+
+  // Letters, spaces, hyphens, apostrophes only
+  assert.equal(sanitizeName("O'Connor-Smith 99!"), "O'Connor-Smith");
+
+  // Roster max 12 (LIMITS.maxPeople)
+  const manyAttendees = Array.from({ length: 15 }, (_, i) => `Person${String.fromCharCode(65 + i)}`);
+  const cappedRoster = buildRoster({
+    ownerName: 'Sam',
+    history: [{ action: 'user_message', payload: { text: `Dinner was me, ${manyAttendees.join(', ')}` } }],
+    items,
+  });
+  assert.equal(cappedRoster.length, 12, 'Roster must cap at LIMITS.maxPeople (12)');
+}
+
+// 12b) Chronological replay & retroactive addition protection in buildRoster
+{
+  // Pre-declaration explicit add with later declaration & persisted DB participants
+  const history = [
+    { action: 'user_message', payload: { text: 'add Priya' } },
+    { action: 'agent_message', payload: { text: 'Who was at dinner?' } },
+    { action: 'user_message', payload: { text: 'Dinner was me, Asha, Ravi and Meera' } },
+  ];
+  const existingParticipants = [
+    { name: 'Asha' },
+    { name: 'Ravi' },
+    { name: 'Meera' },
+  ];
+  const roster = buildRoster({
+    ownerName: 'Sam',
+    history,
+    items,
+    existingParticipants,
+  });
+  assert.deepEqual(roster, ['Sam', 'Asha', 'Ravi', 'Meera']);
+  assert.ok(!roster.includes('Priya'), 'Priya from pre-declaration message must never be added retroactively');
+
+  // Pre-declaration explicit add with existing DB participants only
+  const roster2 = buildRoster({
+    ownerName: 'Sam',
+    history: [{ action: 'user_message', payload: { text: 'add Priya' } }],
+    items,
+    existingParticipants: [{ name: 'Asha' }, { name: 'Meera' }],
+  });
+  assert.deepEqual(roster2, ['Sam', 'Asha', 'Meera']);
+  assert.ok(!roster2.includes('Priya'), 'Priya must not be accepted retroactively');
+
+  // Post-declaration explicit add is accepted
+  const roster3 = buildRoster({
+    ownerName: 'Sam',
+    history: [
+      { action: 'user_message', payload: { text: 'Dinner was me and Asha' } },
+      { action: 'user_message', payload: { text: 'add Priya' } },
+    ],
+    items,
+  });
+  assert.deepEqual(roster3, ['Sam', 'Asha', 'Priya']);
+
+  // Declaration + add in single message
+  const roster4 = buildRoster({
+    ownerName: 'Sam',
+    history: [],
+    currentMessage: 'Dinner was me and Asha. Please add Priya.',
+    items,
+  });
+  assert.deepEqual(roster4, ['Sam', 'Asha', 'Priya']);
+
+  // Explicit add alone without prior roster returns owner only
+  const roster5 = buildRoster({
+    ownerName: 'Sam',
+    history: [],
+    currentMessage: 'add Priya',
+    items,
+  });
+  assert.deepEqual(roster5, ['Sam']);
+}
+
+// 12c) Later Declarations Rule (Item 7)
+// Rule: "allow only names literally typed by the user".
+// Later group declarations add attendees literally typed by the user in that message.
+{
+  const histLater = [
+    { action: 'user_message', payload: { text: 'Dinner was me, Asha and Ravi' } },
+    { action: 'user_message', payload: { text: 'Actually dinner was me, Asha, Ravi and Meera' } },
+  ];
+  const rosterLater = buildRoster({ ownerName: 'Sam', history: histLater, items });
+  assert.deepEqual(rosterLater, ['Sam', 'Asha', 'Ravi', 'Meera'], 'Later declaration adds literally typed user name Meera');
+}
+
+// 12d) DB Baseline & Mismatch Reporting (Item 8)
+// If persisted participants exist in DB but history has no declaration,
+// allow explicit adds from the CURRENT message only; history adds are discarded.
+{
+  const historyWithAdd = [{ action: 'user_message', payload: { text: 'add Priya' } }];
+  const dbParticipants = [{ name: 'Asha' }, { name: 'Ravi' }, { name: 'Meera' }];
+
+  // Explicit add from CURRENT message allowed:
+  const r1 = buildRoster({
+    ownerName: 'Sam',
+    history: historyWithAdd,
+    currentMessage: 'add Karan',
+    items,
+    existingParticipants: dbParticipants,
+  });
+  assert.deepEqual(
+    r1,
+    ['Sam', 'Asha', 'Ravi', 'Meera', 'Karan'],
+    'DB baseline allows explicit add from CURRENT message, while discarding unanchored history add'
+  );
+  assert.ok(!r1.includes('Priya'), 'Priya from pre-baseline history must be discarded');
+
+  // Without current add:
+  const r2 = buildRoster({
+    ownerName: 'Sam',
+    history: historyWithAdd,
+    currentMessage: 'Split the bill',
+    items,
+    existingParticipants: dbParticipants,
+  });
+  assert.deepEqual(r2, ['Sam', 'Asha', 'Ravi', 'Meera']);
+  assert.ok(!r2.includes('Priya'));
 }
 
 // 13) Mocked agent.js handler tests (Requirement 4, G, B, E)
@@ -384,13 +510,38 @@ supabase.from = (table) => {
   }
   if (table === 'agent_log') {
     return {
-      select: () => ({
-        eq: () => ({
-          in: () => ({
-            order: () => ({ data: [...logRecords] }),
-          }),
-        }),
-      }),
+      select: () => {
+        let rows = [...logRecords];
+        const query = {
+          eq: (col, val) => {
+            rows = rows.filter((r) => r[col] === undefined || r[col] === val || (r.payload && r.payload[col] === val));
+            return query;
+          },
+          in: (col, vals) => {
+            rows = rows.filter((r) => vals.includes(r[col]));
+            return query;
+          },
+          order: (col, { ascending = true } = {}) => {
+            rows.sort((a, b) => {
+              const valA = a[col] ?? '';
+              const valB = b[col] ?? '';
+              if (valA < valB) return ascending ? -1 : 1;
+              if (valA > valB) return ascending ? 1 : -1;
+              return 0;
+            });
+            return query;
+          },
+          limit: (n) => {
+            rows = rows.slice(0, n);
+            return query;
+          },
+          get data() {
+            return rows;
+          },
+          then: (resolve) => resolve({ data: rows, error: null }),
+        };
+        return query;
+      },
       insert: (row) => {
         const id = `log-${logRecords.length + 1}`;
         const record = { id, ...row, created_at: new Date().toISOString() };
@@ -414,97 +565,11 @@ supabase.from = (table) => {
   return origFrom.call(supabase, table);
 };
 
-// 13.A) Failure Test: Priya is not in the roster (Bug reproduction)
-// History has: "Dinner was me, Asha, Ravi and Meera"
-// User says: "Priya had the tikka"
-// Gemini tries to call propose_split with Priya in people
-{
-  logRecords = [
-    {
-      id: 'log-1',
-      action: 'user_message',
-      payload: { text: 'Dinner was me, Asha, Ravi and Meera' },
-      created_at: '2026-11-08T10:00:00Z',
-    },
-    {
-      id: 'log-2',
-      action: 'proposal',
-      reasoning: 'Initial proposal for Asha, Ravi, Meera and Sam',
-      payload: {
-        summary: 'Split across Asha, Ravi, Meera, Sam (you).',
-        requests: [
-          { name: 'Asha', amount_cents: 2000, lines: [{ name: 'Paneer Tikka', cents: 2000 }] },
-          { name: 'Ravi', amount_cents: 2000, lines: [] },
-          { name: 'Meera', amount_cents: 2000, lines: [] },
-        ],
-      },
-      status: 'pending',
-      created_at: '2026-11-08T10:00:01Z',
-    },
-  ];
-  participantsDb = [];
-  paypalFetchCalls = [];
+// =========================================================================
+// REQUIRED TESTS (a through g): through actual api/agent.js handler with mocked Gemini & DB
+// =========================================================================
 
-  // Gemini returns a propose_split tool call that includes Priya
-  geminiResponseGenerator = () => ({
-    ok: true,
-    status: 200,
-    json: async () => ({
-      candidates: [
-        {
-          content: {
-            parts: [
-              {
-                functionCall: {
-                  name: 'propose_split',
-                  args: {
-                    people: ['Asha', 'Meera', 'Priya'], // Priya added by LLM
-                    tax_tip_mode: 'proportional',
-                    explanation: 'Priya had the tikka',
-                    assignments: [{ item_name: 'Paneer Tikka', people: ['Priya'] }],
-                  },
-                },
-              },
-            ],
-          },
-        },
-      ],
-    }),
-  });
-
-  const res = createMockRes();
-  await agentHandler(
-    {
-      method: 'POST',
-      body: { splitId, ownerKey, message: 'Priya had the tikka' },
-    },
-    res
-  );
-
-  assert.equal(res.statusCode, 200);
-
-  // Assert clarification message was returned
-  const lastAgentMsg = [...logRecords].reverse().find((l) => l.action === 'agent_message');
-  assert.ok(lastAgentMsg, 'Agent message must be logged');
-  assert.equal(
-    lastAgentMsg.payload.text,
-    "I don't see Priya in this split. Who was at dinner? Say 'add Priya' to include her."
-  );
-
-  // REQUIREMENT G ASSERTIONS:
-  // 1) Zero inserts to agent_log with action 'proposal' and status 'pending'
-  const newPendingProposals = logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending' && l.id !== 'log-2');
-  assert.equal(newPendingProposals.length, 0, 'Must record zero pending proposals in failure case');
-
-  // 2) Zero inserts to participants
-  assert.equal(participantsDb.length, 0, 'Must record zero participant inserts in failure case');
-
-  // 3) Zero PayPal fetches
-  assert.equal(paypalFetchCalls.length, 0, 'Must record zero PayPal fetches in failure case');
-}
-
-// 13.B) Failure Test: No roster has been established (Requirement B)
-// History is empty. User immediately sends "Priya had the tikka".
+// Test a: Empty history, no participants, message "add Priya", Gemini proposes a split containing Priya -> "Who was at dinner?", nothing created.
 {
   logRecords = [];
   participantsDb = [];
@@ -524,7 +589,7 @@ supabase.from = (table) => {
                   args: {
                     people: ['Priya'],
                     tax_tip_mode: 'proportional',
-                    explanation: 'Priya had the tikka',
+                    explanation: 'Add Priya',
                     assignments: [{ item_name: 'Paneer Tikka', people: ['Priya'] }],
                   },
                 },
@@ -540,28 +605,241 @@ supabase.from = (table) => {
   await agentHandler(
     {
       method: 'POST',
-      body: { splitId, ownerKey, message: 'Priya had the tikka' },
+      body: { splitId, ownerKey, message: 'add Priya' },
     },
     res
   );
 
   assert.equal(res.statusCode, 200);
 
-  // Assert Requirement B reply: "Who was at dinner?"
+  const lastAgentMsg = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.ok(lastAgentMsg, 'Agent message must be logged');
+  assert.equal(lastAgentMsg.payload.text, 'Who was at dinner?');
+
+  // Assert mock recorded zero pending proposal inserts, zero participant inserts, zero PayPal fetches
+  const pendingProps = logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.equal(pendingProps.length, 0, 'Must record zero pending proposals in failure case');
+  assert.equal(participantsDb.length, 0, 'Must record zero participant inserts in failure case');
+  assert.equal(paypalFetchCalls.length, 0, 'Must record zero PayPal fetches in failure case');
+}
+
+// Test b: Ordering exploit (Item 7): user sends "add Priya" first (rejected, no roster), then "Dinner was me, Asha, Ravi and Meera". Priya must NOT be in the roster.
+{
+  // Turn 1: "add Priya" was rejected with "Who was at dinner?"
+  logRecords = [
+    {
+      id: 'log-1',
+      action: 'user_message',
+      payload: { text: 'add Priya' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+    {
+      id: 'log-2',
+      action: 'agent_message',
+      payload: { text: 'Who was at dinner?' },
+      created_at: '2026-11-08T10:00:01Z',
+    },
+  ];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  // Turn 2: User sends "Dinner was me, Asha, Ravi and Meera"
+  // If Gemini tries to include Priya, it must be rejected because Priya is NOT in the roster!
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Ravi', 'Meera', 'Priya'], // Maliciously includes Priya from turn 1
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split for group',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const res = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Dinner was me, Asha, Ravi and Meera' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+
+  const lastAgentMsg = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.ok(lastAgentMsg);
+  // Must reject Priya because Priya was never part of the established roster!
+  assert.equal(
+    lastAgentMsg.payload.text,
+    "I don't see Priya in this split. Who was at dinner? Say 'add Priya' to include her."
+  );
+
+  const pendingProps = logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.equal(pendingProps.length, 0, 'Zero pending proposals when Priya is included');
+  assert.equal(participantsDb.length, 0);
+  assert.equal(paypalFetchCalls.length, 0);
+
+  // Now verify that a clean proposal with Asha, Ravi, Meera succeeds and excludes Priya:
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Ravi', 'Meera'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split for group',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resOk = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Dinner was me, Asha, Ravi and Meera' },
+    },
+    resOk
+  );
+  assert.equal(resOk.statusCode, 200);
+  const okProp = logRecords.find((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.ok(okProp);
+  assert.ok(!okProp.payload.requests.some((r) => r.name.toLowerCase() === 'priya'), 'Priya must NOT be in the roster');
+}
+
+// Test c: No roster + exclusion only (Item 5):
+// Empty history, message "Ravi didn't eat" -> "Who was at dinner?", no proposal.
+{
+  logRecords = [];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Sam'],
+                    excluded_people: ['Ravi'],
+                    tax_tip_mode: 'proportional',
+                    explanation: "Ravi didn't eat",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const res = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: "Ravi didn't eat" },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+
   const lastAgentMsg = [...logRecords].reverse().find((l) => l.action === 'agent_message');
   assert.ok(lastAgentMsg);
   assert.equal(lastAgentMsg.payload.text, 'Who was at dinner?');
 
-  // Assert ZERO proposals, participants, or PayPal calls
-  const pendingProposals = logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending');
-  assert.equal(pendingProposals.length, 0, 'Zero proposals when no roster established');
+  const pendingProps = logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.equal(pendingProps.length, 0, 'Zero pending proposals on exclusion with no roster');
   assert.equal(participantsDb.length, 0);
   assert.equal(paypalFetchCalls.length, 0);
 }
 
-// 13.C) Success Test: Explicit "add Priya" is allowed (Requirement 4)
-// User explicitly says "add Priya".
+// Test d: Declaration + add in one message (Item 6):
+// "Dinner was me, Asha, Ravi and Meera. Add Priya." -> roster of five (Sam, Asha, Ravi, Meera, Priya).
 {
+  logRecords = [];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Ravi', 'Meera', 'Priya'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split for 5',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const res = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Dinner was me, Asha, Ravi and Meera. Add Priya.' },
+    },
+    res
+  );
+
+  assert.equal(res.statusCode, 200);
+
+  const prop = logRecords.find((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.ok(prop, 'Proposal must be created for declaration + add in one message');
+  assert.equal(prop.payload.requests.length, 4); // Asha, Ravi, Meera, Priya (plus owner Sam = 5)
+  assert.ok(prop.payload.requests.some((r) => r.name === 'Priya'));
+}
+
+// Test e: Negation and look-alike phrasings do not add anyone:
+{
+  // e1: "Don't add Priya"
   logRecords = [
     {
       id: 'log-1',
@@ -587,6 +865,457 @@ supabase.from = (table) => {
                   args: {
                     people: ['Asha', 'Ravi', 'Meera', 'Priya'],
                     tax_tip_mode: 'proportional',
+                    explanation: 'Try add Priya',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resE1 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: "Don't add Priya" },
+    },
+    resE1
+  );
+
+  assert.equal(resE1.statusCode, 200);
+  const msgE1 = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.equal(msgE1.payload.text, "I don't see Priya in this split. Who was at dinner? Say 'add Priya' to include her.");
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0);
+
+  // e2: "Priya, add the tikka"
+  const resE2 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Priya, add the tikka' },
+    },
+    resE2
+  );
+  assert.equal(resE2.statusCode, 200);
+  const msgE2 = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.equal(msgE2.payload.text, "I don't see Priya in this split. Who was at dinner? Say 'add Priya' to include her.");
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0);
+
+  // e3 (Item 5): Direct buildRoster() assertions for non-adding / look-alike phrasings
+  // For "add the tikka for Asha", "Don't add Priya", "Priya, add the tikka" and "Priya had the tikka",
+  // the roster equals exactly {Sam, Asha, Ravi, Meera}.
+  const baseHist = [
+    {
+      id: 'log-1',
+      action: 'user_message',
+      payload: { text: 'Dinner was me, Asha, Ravi and Meera' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+  ];
+  const expectedFour = ['Sam', 'Asha', 'Ravi', 'Meera'];
+  assert.deepEqual(buildRoster({ ownerName: 'Sam', history: baseHist, currentMessage: 'add the tikka for Asha', items }), expectedFour);
+  assert.deepEqual(buildRoster({ ownerName: 'Sam', history: baseHist, currentMessage: "Don't add Priya", items }), expectedFour);
+  assert.deepEqual(buildRoster({ ownerName: 'Sam', history: baseHist, currentMessage: 'Priya, add the tikka', items }), expectedFour);
+  assert.deepEqual(buildRoster({ ownerName: 'Sam', history: baseHist, currentMessage: 'Priya had the tikka', items }), expectedFour);
+}
+
+// Test f: The clarification from (a) is not treated as roster evidence next turn:
+{
+  logRecords = [
+    {
+      id: 'log-1',
+      action: 'user_message',
+      payload: { text: 'add Priya' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+    {
+      id: 'log-2',
+      action: 'agent_message',
+      payload: { text: "Who was at dinner? Say 'add Priya' to include her." },
+      created_at: '2026-11-08T10:00:01Z',
+    },
+    {
+      id: 'log-3',
+      action: 'user_message',
+      payload: { text: 'Dinner was me, Asha and Meera' },
+      created_at: '2026-11-08T10:00:02Z',
+    },
+    {
+      id: 'log-4',
+      action: 'agent_message',
+      payload: { text: 'Here is my proposed split...' },
+      created_at: '2026-11-08T10:00:03Z',
+    },
+  ];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  // Next turn: user asks for split, LLM includes Priya:
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Meera', 'Priya'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resF = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Split the bill' },
+    },
+    resF
+  );
+
+  assert.equal(resF.statusCode, 200);
+  const msgF = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.equal(msgF.payload.text, "I don't see Priya in this split. Who was at dinner? Say 'add Priya' to include her.");
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0);
+  assert.equal(participantsDb.length, 0);
+  assert.equal(paypalFetchCalls.length, 0);
+}
+
+// Test g: Roster derivation with more than eight prior user messages still finds the original declaration:
+{
+  logRecords = [
+    {
+      id: 'log-g-1',
+      action: 'user_message',
+      payload: { text: 'Dinner was me, Asha, Ravi and Meera' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+    { id: 'log-g-2', action: 'agent_message', payload: { text: 'Got it' }, created_at: '2026-11-08T10:00:01Z' },
+    { id: 'log-g-3', action: 'user_message', payload: { text: 'message 2' }, created_at: '2026-11-08T10:00:02Z' },
+    { id: 'log-g-4', action: 'user_message', payload: { text: 'message 3' }, created_at: '2026-11-08T10:00:03Z' },
+    { id: 'log-g-5', action: 'user_message', payload: { text: 'message 4' }, created_at: '2026-11-08T10:00:04Z' },
+    { id: 'log-g-6', action: 'user_message', payload: { text: 'message 5' }, created_at: '2026-11-08T10:00:05Z' },
+    { id: 'log-g-7', action: 'user_message', payload: { text: 'message 6' }, created_at: '2026-11-08T10:00:06Z' },
+    { id: 'log-g-8', action: 'user_message', payload: { text: 'message 7' }, created_at: '2026-11-08T10:00:07Z' },
+    { id: 'log-g-9', action: 'user_message', payload: { text: 'message 8' }, created_at: '2026-11-08T10:00:08Z' },
+    { id: 'log-g-10', action: 'user_message', payload: { text: 'message 9' }, created_at: '2026-11-08T10:00:09Z' },
+    { id: 'log-g-11', action: 'user_message', payload: { text: 'message 10' }, created_at: '2026-11-08T10:00:10Z' },
+  ];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  // Demonstrate .limit(8) on mock Supabase dropping original declaration (Item 6):
+  const cappedQuery = await supabase.from('agent_log').select('*').in('action', ['user_message']).order('created_at', { ascending: false }).limit(8);
+  const cappedRoster = buildRoster({ ownerName: 'Sam', history: cappedQuery.data.reverse(), currentMessage: 'Split everything equally', items });
+  assert.deepEqual(cappedRoster, ['Sam'], 'Capping history at 8 rows drops the declaration and returns owner only');
+
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Ravi', 'Meera'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split for group',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resG = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Split everything equally' },
+    },
+    resG
+  );
+
+  assert.equal(resG.statusCode, 200);
+
+  const propG = logRecords.find((l) => l.action === 'proposal' && l.status === 'pending');
+  assert.ok(propG, 'Must find original declaration despite >8 prior user messages');
+  assert.equal(propG.payload.requests.length, 3);
+  assert.deepEqual(
+    propG.payload.requests.map((r) => r.name).sort(),
+    ['Asha', 'Meera', 'Ravi']
+  );
+}
+
+// Test h (Item 3): Propose_split version with persisted DB participants & historical pre-declaration add
+{
+  logRecords = [
+    {
+      id: 'log-h-1',
+      action: 'user_message',
+      payload: { text: 'add Priya' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+    {
+      id: 'log-h-2',
+      action: 'agent_message',
+      payload: { text: 'Who was at dinner?' },
+      created_at: '2026-11-08T10:00:01Z',
+    },
+    {
+      id: 'log-h-3',
+      action: 'user_message',
+      payload: { text: 'Dinner was me, Asha, Ravi and Meera' },
+      created_at: '2026-11-08T10:00:02Z',
+    },
+    {
+      id: 'log-h-4',
+      action: 'proposal',
+      status: 'approved',
+      payload: { summary: 'Split approved' },
+      created_at: '2026-11-08T10:00:03Z',
+    },
+  ];
+  // Participants persisted to DB from approved split:
+  participantsDb = [
+    { id: 'p1', split_id: splitId, name: 'Asha', share: 2000, status: 'pending' },
+    { id: 'p2', split_id: splitId, name: 'Ravi', share: 2000, status: 'pending' },
+    { id: 'p3', split_id: splitId, name: 'Meera', share: 2000, status: 'pending' },
+  ];
+  paypalFetchCalls = [];
+
+  // Part 1: Gemini returns propose_split with Priya on the next turn
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Ravi', 'Meera', 'Priya'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split with Priya',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resH1 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Split the bill with Priya' },
+    },
+    resH1
+  );
+
+  assert.equal(resH1.statusCode, 200);
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0, 'Zero pending proposals created');
+  assert.equal(participantsDb.length, 3, 'Zero participant inserts');
+  assert.equal(paypalFetchCalls.length, 0, 'Zero PayPal fetches');
+
+  // Part 2: Reminders test (Asha, Ravi, Meera, Priya)
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'draft_reminders',
+                  args: {
+                    reminders: [
+                      { participant_name: 'Asha', message: 'Hi Asha, gentle reminder for dinner' },
+                      { participant_name: 'Ravi', message: 'Hi Ravi, gentle reminder for dinner' },
+                      { participant_name: 'Meera', message: 'Hi Meera, gentle reminder for dinner' },
+                      { participant_name: 'Priya', message: 'Hi Priya, gentle reminder for dinner' },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resH2 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Send reminders to everyone' },
+    },
+    resH2
+  );
+
+  assert.equal(resH2.statusCode, 200);
+  const reminders = logRecords.filter((l) => l.action === 'reminder_draft');
+  assert.equal(reminders.length, 3);
+  assert.deepEqual(
+    reminders.map((r) => r.payload.name).sort(),
+    ['Asha', 'Meera', 'Ravi']
+  );
+  assert.ok(!reminders.some((r) => r.payload.name === 'Priya'), 'Priya must never receive a reminder');
+  assert.equal(paypalFetchCalls.length, 0, 'Zero PayPal fetches');
+}
+
+// Test i (Item 2): Discriminating no-roster gate test through handler
+// No roster, message "Split the bill", Gemini returns people: [] or only the owner.
+// Expect exact reply "Who was at dinner?" with zero pending proposals, zero participants, zero PayPal fetches.
+{
+  logRecords = [];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  // Case i1: people: []
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: [],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split with empty people',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resI1 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Split the bill' },
+    },
+    resI1
+  );
+
+  assert.equal(resI1.statusCode, 200);
+  const msgI1 = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.equal(msgI1.payload.text, 'Who was at dinner?', 'Must reply "Who was at dinner?" on empty people when no roster exists');
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0, 'Zero pending proposals');
+  assert.equal(participantsDb.length, 0, 'Zero participant inserts');
+  assert.equal(paypalFetchCalls.length, 0, 'Zero PayPal fetches');
+
+  // Case i2: people: ['Sam'] (only owner)
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Sam'],
+                    tax_tip_mode: 'proportional',
+                    explanation: 'Split for owner only',
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  });
+
+  const resI2 = createMockRes();
+  await agentHandler(
+    {
+      method: 'POST',
+      body: { splitId, ownerKey, message: 'Split the bill' },
+    },
+    resI2
+  );
+
+  assert.equal(resI2.statusCode, 200);
+  const msgI2 = [...logRecords].reverse().find((l) => l.action === 'agent_message');
+  assert.equal(msgI2.payload.text, 'Who was at dinner?', 'Must reply "Who was at dinner?" on owner-only when no roster exists');
+  assert.equal(logRecords.filter((l) => l.action === 'proposal' && l.status === 'pending').length, 0, 'Zero pending proposals');
+  assert.equal(participantsDb.length, 0, 'Zero participant inserts');
+  assert.equal(paypalFetchCalls.length, 0, 'Zero PayPal fetches');
+}
+
+// Test j (Item 4): Restored explicit add with established roster
+// Established roster in history + later user message "add Priya" lets Priya into the proposal
+{
+  logRecords = [
+    {
+      id: 'log-1',
+      action: 'user_message',
+      payload: { text: 'Dinner was me, Asha and Meera' },
+      created_at: '2026-11-08T10:00:00Z',
+    },
+  ];
+  participantsDb = [];
+  paypalFetchCalls = [];
+
+  geminiResponseGenerator = () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'propose_split',
+                  args: {
+                    people: ['Asha', 'Meera', 'Priya'],
+                    tax_tip_mode: 'proportional',
                     explanation: 'Added Priya',
                     assignments: [{ item_name: 'Paneer Tikka', people: ['Priya'] }],
                   },
@@ -599,27 +1328,25 @@ supabase.from = (table) => {
     }),
   });
 
-  const res = createMockRes();
+  const resJ = createMockRes();
   await agentHandler(
     {
       method: 'POST',
       body: { splitId, ownerKey, message: 'add Priya' },
     },
-    res
+    resJ
   );
 
-  assert.equal(res.statusCode, 200);
-
-  // Assert proposal was successfully created
+  assert.equal(resJ.statusCode, 200);
   const createdProposal = logRecords.find((l) => l.action === 'proposal' && l.status === 'pending');
   assert.ok(createdProposal, 'Explicit "add Priya" must allow proposal creation');
   assert.ok(createdProposal.payload.requests.some((r) => r.name === 'Priya'), 'Priya must be in the proposal requests');
 }
 
-// 13.D) Item Reassignment Test (Requirement 3 & E)
+// Test k (Item 4): Restored item reassignment move stated in Assumptions
 // Previous proposal had Paneer Tikka assigned to Asha.
 // New instruction reassigns Paneer Tikka to Meera.
-// Must show the move in Assumptions: "Paneer Tikka reassigned from Asha to Meera."
+// Proposal must state "Paneer Tikka reassigned from Asha to Meera." in Assumptions.
 {
   logRecords = [
     {
@@ -670,17 +1397,16 @@ supabase.from = (table) => {
     }),
   });
 
-  const res = createMockRes();
+  const resK = createMockRes();
   await agentHandler(
     {
       method: 'POST',
       body: { splitId, ownerKey, message: 'Actually Meera had the Paneer Tikka' },
     },
-    res
+    resK
   );
 
-  assert.equal(res.statusCode, 200);
-
+  assert.equal(resK.statusCode, 200);
   const newProp = logRecords.find((l) => l.action === 'proposal' && l.status === 'pending' && l.id !== 'log-2');
   assert.ok(newProp, 'New proposal must be created');
   assert.ok(

@@ -164,20 +164,22 @@ export function extractExplicitAdds(msg, receiptItemNames = []) {
   if (/\b(?:don't|dont|do\s+not|never|not|cannot|shouldn't|stop)\s+(?:add|include)\b/i.test(msg)) {
     return [];
   }
-  const match = msg.match(/(?:^|[.!?;\n])\s*(?:please\s+)?(?:add|include)\s+([^.!?;\n]+)/i);
-  if (!match) return [];
+  const matches = msg.matchAll(/(?:^|[.!?;\n])\s*(?:please\s+)?(?:add|include)\s+([^.!?;\n]+)/gi);
+  const found = [];
+  for (const match of matches) {
+    let target = match[1].trim();
+    // Strip trailing context like "to the split" or "to the bill"
+    target = target.replace(/\s+to\s+(?:the\s+)?(?:split|bill|dinner|meal|table|group)$/i, '');
 
-  let target = match[1].trim();
-  // Strip trailing context like "to the split" or "to the bill"
-  target = target.replace(/\s+to\s+(?:the\s+)?(?:split|bill|dinner|meal|table|group)$/i, '');
+    // Look-alike checks: if target starts with an article or quantifier, it's adding an item (e.g. "add the tikka")
+    if (/^(?:the|a|an|some|item|items|more|another)\s+/i.test(target)) continue;
 
-  // Look-alike checks: if target starts with an article or quantifier, it's adding an item (e.g. "add the tikka")
-  if (/^(?:the|a|an|some|item|items|more|another)\s+/i.test(target)) return [];
+    // Look-alike check: if target contains "for [someone]" or "to [something]", it's adding an item (e.g. "add the tikka for Asha")
+    if (/\b(?:for|to)\b/i.test(target)) continue;
 
-  // Look-alike check: if target contains "for [someone]" or "to [something]", it's adding an item (e.g. "add the tikka for Asha")
-  if (/\b(?:for|to)\b/i.test(target)) return [];
-
-  return extractNamesFromList(target, receiptItemNames);
+    found.push(...extractNamesFromList(target, receiptItemNames));
+  }
+  return [...new Set(found)];
 }
 
 /**
@@ -250,6 +252,27 @@ export function parseGroupDeclaration(msg, receiptItemNames = []) {
 /**
  * Builds the attendee roster server-side from all user messages and DB state.
  * Max roster size: 12.
+ *
+ * Rules:
+ * 1. Distinguishes "roster is established" from "explicit add".
+ * 2. Chronological replay of user-originated messages (action === 'user_message') only:
+ *    - State starts as "no roster".
+ *    - A valid group declaration establishes the roster.
+ *    - An explicit add is applied ONLY IF a roster is already established
+ *      (earlier message, or the same message as the declaration).
+ *      Otherwise it is discarded permanently; it is not remembered for later turns.
+ * 3. Later Declarations Rule: "allow only names literally typed by the user".
+ *    Any attendee names from a subsequent group declaration are accepted only if
+ *    they were literally typed by the human user in that user-originated message
+ *    (validated against non-item candidate words and sanitized), ensuring model
+ *    hallucinations and assistant outputs never add names.
+ * 4. DB Baseline:
+ *    If persisted participants exist in the database but history has no declaration,
+ *    they establish the baseline roster. Explicit adds are allowed from the CURRENT
+ *    message only (unanchored adds from earlier history messages are discarded).
+ *    Any mismatch where a persisted participant was not in the replayed history
+ *    is reported via warning.
+ * 5. An explicit add alone NEVER establishes the roster.
  */
 export function buildRoster({ ownerName, history = [], currentMessage = '', items = [], existingParticipants = [] }) {
   const itemNames = (items || []).map((i) => i.name || '');
@@ -260,47 +283,78 @@ export function buildRoster({ ownerName, history = [], currentMessage = '', item
     rosterMap.set(owner.toLowerCase(), owner);
   }
 
-  // Include any existing participants already saved in database
-  for (const p of existingParticipants || []) {
-    const s = sanitizeName(p.name, 30);
-    if (s && !rosterMap.has(s.toLowerCase())) {
-      rosterMap.set(s.toLowerCase(), s);
-    }
-  }
+  let hasEstablishedRoster = false;
 
-  // Chronologically scan all prior user messages from history
+  // 1. Chronologically replay prior user-originated messages from history (action === 'user_message')
   const priorUserMessages = (history || [])
-    .filter((h) => h.action === 'user_message')
+    .filter((h) => h && h.action === 'user_message')
     .map((h) => String(h.payload?.text || ''));
 
   for (const text of priorUserMessages) {
+    if (!text) continue;
     const declared = parseGroupDeclaration(text, itemNames);
-    for (const d of declared) {
-      if (!rosterMap.has(d.toLowerCase())) rosterMap.set(d.toLowerCase(), d);
+    if (declared.length > 0) {
+      hasEstablishedRoster = true;
+      for (const d of declared) {
+        if (!rosterMap.has(d.toLowerCase())) rosterMap.set(d.toLowerCase(), d);
+      }
     }
-    const added = extractExplicitAdds(text, itemNames);
-    for (const a of added) {
-      if (!rosterMap.has(a.toLowerCase())) rosterMap.set(a.toLowerCase(), a);
+    // Explicit adds count ONLY IF a roster is established
+    if (hasEstablishedRoster) {
+      const added = extractExplicitAdds(text, itemNames);
+      for (const a of added) {
+        if (!rosterMap.has(a.toLowerCase())) rosterMap.set(a.toLowerCase(), a);
+      }
     }
   }
 
-  const hadPriorRoster = rosterMap.size > (owner ? 1 : 0);
+  // 2. DB BASELINE: Incorporate previously persisted participants from database.
+  // If persisted participants exist but history has no declaration, they establish the baseline roster.
+  const replayedNames = new Set(rosterMap.keys());
+  const mismatches = [];
 
-  // Scan current user message:
-  // - If no roster was established yet, check if current message is a group declaration
-  if (!hadPriorRoster && currentMessage) {
+  for (const p of existingParticipants || []) {
+    const s = sanitizeName(p.name, 30);
+    if (s) {
+      const key = s.toLowerCase();
+      if (!replayedNames.has(key) && key !== (owner || '').toLowerCase()) {
+        mismatches.push(s);
+      }
+      if (!rosterMap.has(key)) {
+        rosterMap.set(key, s);
+      }
+      if (key !== (owner || '').toLowerCase()) {
+        hasEstablishedRoster = true;
+      }
+    }
+  }
+
+  if (mismatches.length > 0) {
+    console.warn(`[roster] DB baseline mismatch: persisted participant(s) [${mismatches.join(', ')}] not found in replayed history declarations.`);
+  }
+
+  // 3. Evaluate CURRENT user message:
+  // If DB baseline established the roster, hasEstablishedRoster is true,
+  // which allows explicit adds from the CURRENT message only!
+  if (currentMessage && typeof currentMessage === 'string') {
     const declared = parseGroupDeclaration(currentMessage, itemNames);
-    for (const d of declared) {
-      if (!rosterMap.has(d.toLowerCase())) rosterMap.set(d.toLowerCase(), d);
+    if (declared.length > 0) {
+      hasEstablishedRoster = true;
+      for (const d of declared) {
+        if (!rosterMap.has(d.toLowerCase())) rosterMap.set(d.toLowerCase(), d);
+      }
+    }
+    if (hasEstablishedRoster) {
+      const added = extractExplicitAdds(currentMessage, itemNames);
+      for (const a of added) {
+        if (!rosterMap.has(a.toLowerCase())) rosterMap.set(a.toLowerCase(), a);
+      }
     }
   }
 
-  // - Requirement 2: Only allow a new name if the latest user message explicitly adds them!
-  if (currentMessage) {
-    const added = extractExplicitAdds(currentMessage, itemNames);
-    for (const a of added) {
-      if (!rosterMap.has(a.toLowerCase())) rosterMap.set(a.toLowerCase(), a);
-    }
+  // If no roster has been established, return owner only (no attendees)
+  if (!hasEstablishedRoster) {
+    return owner ? [owner] : [];
   }
 
   return [...rosterMap.values()].slice(0, LIMITS.maxPeople);

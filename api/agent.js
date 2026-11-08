@@ -1,7 +1,7 @@
 import { supabase } from './_lib/supabase.js';
 import { allowMethod, assertOwner, logEvent, sanitizeText } from './_lib/http.js';
 import { chat } from './_lib/llm.js';
-import { TOOLS, buildProposal, buildReminders, buildRoster, sanitizeName } from './_lib/agent-tools.js';
+import { TOOLS, buildProposal, buildReminders, buildRoster, sanitizeName, extractExplicitAdds } from './_lib/agent-tools.js';
 
 const SYSTEM = `You are SplitPilot, an assistant that helps one person (the "owner", who already paid the bill) collect their friends' shares through PayPal.
 
@@ -96,9 +96,14 @@ export default async function handler(req, res) {
     const proposeCall = result.toolCalls.find((c) => c.name === 'propose_split');
     const remindCall = result.toolCalls.find((c) => c.name === 'draft_reminders');
 
+    const rosterAttendees = roster.filter((n) => n.toLowerCase() !== (split.owner_name || '').toLowerCase());
+    const hasRoster = rosterAttendees.length > 0;
+
     if (proposeCall) {
       if (participants.length > 0) {
         reply = 'Payment requests already exist for this split, so I can\'t propose a new one. I can still draft reminders.';
+      } else if (!hasRoster) {
+        reply = 'Who was at dinner?';
       } else {
         const prevProposal = [...(history || [])].reverse().find((h) => h.action === 'proposal' && h.payload)?.payload;
         const built = buildProposal({
@@ -139,6 +144,16 @@ export default async function handler(req, res) {
           await supabase.from('participants').update({ last_reminded_at: new Date().toISOString() }).eq('id', d.participant.id);
         }
         reply = reply || `I drafted ${drafts.length} reminder${drafts.length > 1 ? 's' : ''}. Share them with one tap.`;
+      }
+    }
+
+    if (!hasRoster) {
+      const itemNames = items.map((i) => i.name);
+      if (
+        extractExplicitAdds(message, itemNames).length > 0 ||
+        /\b(?:didn't eat|did not eat|had the|had a|had an|exclude|excluded|only had|ate the)\b/i.test(message)
+      ) {
+        reply = 'Who was at dinner?';
       }
     }
 
