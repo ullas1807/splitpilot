@@ -9,4 +9,4 @@ crons = ["*/15 * * * *"]
 
 [vars]
 # EDIT THIS to your deployed Vercel URL:
-SWEEP_URL = "https://YOUR-APP.vercel.app/api/agent-sweep"
+SWEEP_URL = "https://splitpilot-iota.vercel.app/api/agent-sweep"

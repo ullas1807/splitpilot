@@ -13,7 +13,7 @@
     "dev:full": "vercel dev",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/test-split.mjs && node scripts/test-agent.mjs && node scripts/test-llm.mjs && node scripts/test-security.mjs && node scripts/test-rawbody.mjs && node scripts/test-allocation-e2e.mjs",
+    "test": "node scripts/test-split.mjs && node scripts/test-agent.mjs && node scripts/test-llm.mjs && node scripts/test-security.mjs && node scripts/test-rawbody.mjs && node scripts/test-allocation-e2e.mjs && node scripts/test-sweep.mjs",
     "test:agent": "node scripts/test-agent.mjs",
     "test:llm": "node scripts/test-llm.mjs",
     "preflight": "node scripts/preflight.mjs"
