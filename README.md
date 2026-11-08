@@ -1,4 +1,10 @@
-**Live Demo:** https://splitpilot-iota.vercel.app
+Hosted demo: https://splitpilot-iota.vercel.app · Demo video: `ADD-YOUTUBE-URL`
+
+## Test the payment (PayPal Sandbox)
+Use this throwaway sandbox buyer. No real money moves.
+- Email: sb-kbccs53803558@personal.example.com
+- Password: t64%|>V5
+
 # 🧾 SplitPilot
 
 **An AI agent that turns a receipt photo into settled PayPal payments, and it can never spend money without a human approving it.**
@@ -32,7 +38,7 @@ Built for the *Build What's Next with PayPal and AI* hackathon.
 flowchart LR
   U[Browser: React + Framer Motion + Leaflet/OSM] -->|/api/*| V[Vercel Node functions]
   V -->|vision + function calling| G[Gemini]
-  V -.->|fallback if Gemini fails| X[Grok / xAI]
+  V -.->|optional fallback; disabled in demo deployment| X[Grok / xAI]
   V -->|Orders v2 create/capture| P[PayPal Sandbox]
   P -->|signed webhooks| V
   V <--> S[(Supabase: Postgres + Storage)]
@@ -46,7 +52,7 @@ flowchart LR
 |---|---|
 | **PayPal (Sandbox)** | Orders v2 create + capture, JS SDK Checkout buttons, signed webhooks (`PAYMENT.CAPTURE.*`), idempotent settlement |
 | **Google Gemini** | Primary AI: receipt vision → structured JSON; agent function calling (`propose_split`, `draft_reminders`) |
-| **Grok (xAI)** | Text-only fallback for the agent when Gemini errors or rate-limits (OpenAI-compatible API) |
+| **Grok (xAI)** | Optional fallback, implemented but disabled in the demo deployment. |
 | **Supabase** | Postgres + Row Level Security (all client access revoked), private Storage bucket for receipts |
 | **Vercel** | Hosting + Node serverless API |
 | **Wrangler / Cloudflare Workers** | Scheduled reminder sweeps (Vercel Hobby only allows daily crons) |
@@ -73,7 +79,7 @@ flowchart LR
 ## Run it yourself
 
 ### 0. Prerequisites
-Node 20+, accounts for: PayPal Developer, Supabase, Google AI Studio, Vercel (xAI and Cloudflare optional).
+Node 20+, accounts for: PayPal Developer, Supabase, Google AI Studio, Vercel (Cloudflare optional; xAI only needed to enable the optional Grok fallback).
 
 ### 1. Install
 ```bash
@@ -89,9 +95,9 @@ npm test        # offline tests: split math, agent guardrails, LLM layer, paymen
 1. developer.paypal.com → **Apps & Credentials → Sandbox → Create App**. Copy Client ID + Secret.
 2. **Sandbox → Accounts**: keep a *Business* (merchant) and a *Personal* (test buyer) account.
 
-### 4. Gemini (and optional Grok)
+### 4. Gemini and optional Grok fallback
 1. aistudio.google.com → create an API key. Choose a current model from the model list and set `GEMINI_MODEL`. *(Model IDs change; if you get a "model not found" error, update this variable.)*
-2. Optional: console.x.ai → API key → `XAI_API_KEY`, and set `XAI_MODEL` to a current Grok model id.
+2. Optional: console.x.ai → API key → `XAI_API_KEY`, and set `XAI_MODEL` to a current Grok model ID. This enables the optional fallback for your own deployment; it is disabled in the demo deployment.
 
 ### 5. Environment variables
 Copy `.env.example` → `.env` for local use, and add the **same values** in Vercel → Project → Settings → Environment Variables. Generate `CRON_SECRET` with `openssl rand -hex 24`.
@@ -116,7 +122,7 @@ npx wrangler login
 npx wrangler secret put CRON_SECRET     # paste the SAME value as in Vercel
 npx wrangler deploy
 ```
-It runs every 15 minutes. Tune `SWEEP_MIN_AGE_MIN` / `SWEEP_INTERVAL_MIN` in Vercel. For a live demo, open the worker URL in a browser to trigger a sweep immediately (set `SWEEP_MIN_AGE_MIN=0` temporarily).
+It runs every 15 minutes. Tune `SWEEP_MIN_AGE_MIN` / `SWEEP_INTERVAL_MIN` in Vercel.
 
 ### 9. Smoke test
 Sample receipt → agent → approve → pay with a sandbox Personal account → status flips to Paid.
@@ -135,7 +141,7 @@ Sample receipt → agent → approve → pay with a sandbox Personal account →
 ## Project layout
 ```
 api/            Vercel serverless endpoints (receipt parsing, agent, approval, PayPal order/capture/webhook, sweep)
-api/_lib/       LLM layer (Gemini + Grok fallback), agent tools & guardrails, exact split math, PayPal client
+api/_lib/       LLM layer (Gemini + optional Grok fallback; disabled in demo deployment), agent tools & guardrails, exact split math, PayPal client
 src/            React app (create flow, split dashboard, agent feed, pay page, maps)
 supabase/       schema.sql (tables, RLS, storage bucket)
 worker/         Cloudflare Worker (Wrangler) for scheduled reminders
